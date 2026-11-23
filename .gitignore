@@ -1,0 +1,19 @@
+# .NET build artifacts
+bin/
+obj/
+
+# Visual Studio / JetBrains / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln.docstates
+.idea/
+
+# Logs gerados em execução
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
