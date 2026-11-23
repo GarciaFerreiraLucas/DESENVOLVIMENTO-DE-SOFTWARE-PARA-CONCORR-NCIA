@@ -14,6 +14,9 @@ obj/
 logs/
 *.log
 
+# Pasta local de entregáveis (prints/evidências - não subir para o Git)
+entregaveis/
+
 # OS
 .DS_Store
 Thumbs.db
