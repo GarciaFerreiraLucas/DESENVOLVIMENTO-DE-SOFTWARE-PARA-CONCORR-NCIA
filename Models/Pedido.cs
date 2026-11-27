@@ -6,7 +6,8 @@ public enum StatusPedido
     NoBalcao,
     EmPreparo,
     Pronto,
-    RecusadoSemEstoque
+    RecusadoSemEstoque,
+    TravadoEmDeadlock
 }
 
 public sealed class Pedido

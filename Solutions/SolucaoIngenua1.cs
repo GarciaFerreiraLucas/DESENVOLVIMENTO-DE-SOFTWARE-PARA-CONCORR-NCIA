@@ -7,20 +7,27 @@ using RestauranteConcorrente.Resources;
 namespace RestauranteConcorrente.Solutions;
 
 /// <summary>
-/// Orquestra o cenário do Restaurante Concorrente usando a Solução Ingênua 1:
-/// múltiplas Tasks rodando em paralelo SEM nenhum controle de concorrência.
+/// SOLUÇÃO INGÊNUA 1 — SEM CONTROLE DE CONCORRÊNCIA.
+/// Orquestra o cenário do Restaurante Concorrente com múltiplas Tasks rodando
+/// em paralelo SEM nenhum controle de concorrência (Race Condition / Lost Update / Estoque Negativo).
 /// </summary>
-public sealed class SolucaoIngenua1
+public sealed class SolucaoIngenua1 : ISolucaoSimulacao
 {
     private const int QuantidadeGarcons = 3;
     private const int PedidosPorGarcom = 6;
     private const int QuantidadeCozinheiros = 4;
     private const int CapacidadeBalcao = 4;
 
+    public int Numero => 1;
+    public string Titulo => "Solução Ingênua 1 — Sem Controle de Concorrência";
+    public string ProblemaDemonstrado => "Race Condition (Duplicidade, Perda, Estoque Negativo e Lost Update)";
+
     private readonly EventLogger _logger = new();
 
     public async Task ExecutarAsync()
     {
+        var processo = Process.GetCurrentProcess();
+        var cpuInicio = processo.TotalProcessorTime;
         var cronometro = Stopwatch.StartNew();
 
         _logger.Linha("================================================================================", ConsoleColor.Cyan);
@@ -57,17 +64,21 @@ public sealed class SolucaoIngenua1
         _logger.Registrar("Sistema", "Todos os garçons finalizaram. Aguardando a cozinha esvaziar o balcão...");
 
         var resultadosCozinheiros = await Task.WhenAll(tarefasCozinheiros);
-        cronometro.Stop();
 
-        ExibirRelatorioFinal(resultadosGarcons, resultadosCozinheiros, estoque, caixa, cronometro.Elapsed);
+        cronometro.Stop();
+        var cpuConsumido = processo.TotalProcessorTime - cpuInicio;
+
+        GerarRelatorio(resultadosGarcons, resultadosCozinheiros, estoque, caixa, cronometro.Elapsed, cpuConsumido)
+            .Exibir(_logger);
     }
 
-    private void ExibirRelatorioFinal(
+    private RelatorioSimulacao GerarRelatorio(
         ResultadoGarcom[] resultadosGarcons,
         ResultadoCozinheiro[] resultadosCozinheiros,
         Estoque estoque,
         Caixa caixa,
-        TimeSpan duracao)
+        TimeSpan duracao,
+        TimeSpan cpuConsumido)
     {
         var todosPedidosCriados = resultadosGarcons.SelectMany(g => g.PedidosCriados).ToList();
         var todosPreparos = resultadosCozinheiros.SelectMany(c => c.PedidosPreparados).ToList();
@@ -92,81 +103,30 @@ public sealed class SolucaoIngenua1
             .OrderBy(s => s)
             .ToList();
 
-        int totalDuplicados = resultadosCozinheiros.Sum(c => c.PedidosDuplicadosObservados);
-        int totalEstourosBalcao = resultadosGarcons.Sum(g => g.EstourosBalcaoObservados);
-        int totalErrosLista = resultadosGarcons.Sum(g => g.ErrosConcorrenciaLista)
-                              + resultadosCozinheiros.Sum(c => c.ErrosConcorrenciaLista);
-        int totalEstoquesNegativos = resultadosCozinheiros.Sum(c => c.EstoquesNegativosObservados);
-        int totalLostUpdates = resultadosCozinheiros.Sum(c => c.LostUpdatesCaixaObservados);
-        int totalRecusados = resultadosCozinheiros.Sum(c => c.PedidosRecusadosSemEstoque);
-
-        decimal faturamentoEsperado = resultadosCozinheiros.Sum(c => c.FaturamentoEsperadoLocal);
-        decimal diferencaFaturamento = faturamentoEsperado - caixa.FaturamentoTotal;
-
-        var saldosFinais = estoque.ObterSaldosFinais();
-        var ingredientesNegativos = saldosFinais.Where(kv => kv.Value < 0).ToList();
-
-        _logger.Linha("");
-        _logger.Linha("================================================================================", ConsoleColor.Magenta);
-        _logger.Linha("               RELATÓRIO FINAL — SOLUÇÃO INGÊNUA 1 (SEM CONTROLE)", ConsoleColor.Magenta);
-        _logger.Linha("================================================================================", ConsoleColor.Magenta);
-        _logger.Linha($"Tempo total de execução ............: {duracao.TotalSeconds:F2} s");
-        _logger.Linha($"Pedidos criados pelos garçons ......: {todosPedidosCriados.Count}");
-        _logger.Linha($"Pratos finalizados (total execuções): {todosPreparos.Count} ({codigosPreparadosUnicos.Count} pedidos únicos)");
-        _logger.Linha($"Pedidos recusados (sem estoque) ....: {totalRecusados}");
-        _logger.Linha($"Vendas esperadas x Caixa ...........: {todosPreparos.Count} esperadas | {caixa.VendasRegistradas} registradas");
-        _logger.Linha($"Faturamento esperado ...............: R$ {faturamentoEsperado:F2}");
-        _logger.Linha($"Faturamento registrado no Caixa ....: R$ {caixa.FaturamentoTotal:F2}");
-        _logger.Linha($"Estoque final ......................: {string.Join(" | ", saldosFinais.Select(kv => $"{kv.Key}: {kv.Value}"))}");
-        _logger.Linha("");
-        _logger.Linha("PROBLEMAS DE CONCORRÊNCIA DETECTADOS:", ConsoleColor.Red);
-
-        string detalheDuplicados = preparosDuplicados.Count > 0
-            ? $" [{string.Join(", ", preparosDuplicados)}]"
-            : string.Empty;
-
-        ImprimirVerificacao(
-            totalDuplicados == 0 && preparosDuplicados.Count == 0,
-            "Nenhum pedido preparado em duplicidade.",
-            $"Pedidos pegos/preparados em duplicidade: {Math.Max(totalDuplicados, preparosDuplicados.Count)} ocorrência(s){detalheDuplicados}.");
-
-        ImprimirVerificacao(
-            pedidosPerdidos.Count == 0,
-            "Nenhum pedido perdido no balcão.",
-            $"Pedidos perdidos (sumiram da lista sem preparo): {pedidosPerdidos.Count} [{string.Join(", ", pedidosPerdidos)}].");
-
-        ImprimirVerificacao(
-            totalEstourosBalcao == 0,
-            "Capacidade do balcão sempre respeitada.",
-            $"Estouros de capacidade do balcão (> {CapacidadeBalcao}): {totalEstourosBalcao} ocorrência(s).");
-
-        ImprimirVerificacao(
-            totalErrosLista == 0,
-            "Nenhum erro de acesso concorrente à List<Pedido>.",
-            $"Exceções/falhas de acesso concorrente no balcão: {totalErrosLista} ocorrência(s).");
-
-        ImprimirVerificacao(
-            ingredientesNegativos.Count == 0 && totalEstoquesNegativos == 0,
-            "Nenhum ingrediente ficou com estoque negativo.",
-            $"Estoque negativo detectado ({totalEstoquesNegativos} ocorrência(s)): {string.Join(", ", ingredientesNegativos.Select(kv => $"{kv.Key}={kv.Value}"))}.");
-
-        ImprimirVerificacao(
-            diferencaFaturamento == 0 && totalLostUpdates == 0,
-            "Faturamento do Caixa consistente (sem Lost Update).",
-            $"Faturamento inconsistente! Diferença perdida: R$ {diferencaFaturamento:F2} ({totalLostUpdates} lost update(s) detectado(s)).");
-
-        _logger.Linha("================================================================================", ConsoleColor.Magenta);
-    }
-
-    private void ImprimirVerificacao(bool ok, string mensagemOk, string mensagemErro)
-    {
-        if (ok)
+        return new RelatorioSimulacao
         {
-            _logger.Linha($"  [OK]       {mensagemOk}", ConsoleColor.Green);
-        }
-        else
-        {
-            _logger.Linha($"  [PROBLEMA] {mensagemErro}", ConsoleColor.Red);
-        }
+            TituloSolucao = "SOLUÇÃO INGÊNUA 1 (SEM CONTROLE DE CONCORRÊNCIA)",
+            ProblemaAlvo = ProblemaDemonstrado,
+            DuracaoRelogio = duracao,
+            TempoCpuConsumido = cpuConsumido,
+            CapacidadeBalcao = CapacidadeBalcao,
+            PedidosCriados = todosPedidosCriados.Count,
+            PratosFinalizadosTotal = todosPreparos.Count,
+            PedidosUnicosFinalizados = codigosPreparadosUnicos.Count,
+            PedidosRecusadosSemEstoque = resultadosCozinheiros.Sum(c => c.PedidosRecusadosSemEstoque),
+            VendasEsperadas = todosPreparos.Count,
+            VendasRegistradasCaixa = caixa.VendasRegistradas,
+            FaturamentoEsperado = resultadosCozinheiros.Sum(c => c.FaturamentoEsperadoLocal),
+            FaturamentoRegistradoCaixa = caixa.FaturamentoTotal,
+            EstoqueFinal = estoque.ObterSaldosFinais(),
+            PedidosDuplicados = resultadosCozinheiros.Sum(c => c.PedidosDuplicadosObservados),
+            DetalhePedidosDuplicados = preparosDuplicados,
+            PedidosPerdidos = pedidosPerdidos,
+            EstourosCapacidadeBalcao = resultadosGarcons.Sum(g => g.EstourosBalcaoObservados),
+            ExcecoesAcessoConcorrente = resultadosGarcons.Sum(g => g.ErrosConcorrenciaLista)
+                                      + resultadosCozinheiros.Sum(c => c.ErrosConcorrenciaLista),
+            OcorrenciasEstoqueNegativo = resultadosCozinheiros.Sum(c => c.EstoquesNegativosObservados),
+            LostUpdatesCaixa = resultadosCozinheiros.Sum(c => c.LostUpdatesCaixaObservados)
+        };
     }
 }

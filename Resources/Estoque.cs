@@ -10,22 +10,33 @@ namespace RestauranteConcorrente.Resources;
 public sealed class Estoque
 {
     private readonly Dictionary<string, int> _quantidades;
+    private readonly object _lockEstoque = new();
     private readonly EventLogger _logger;
 
-    public Estoque(EventLogger logger)
+    public Estoque(EventLogger logger, int? saldoUniforme = null)
     {
         _logger = logger;
 
         // Todas as chaves são pré-cadastradas aqui; a disputa ocorre na leitura/escrita dos saldos.
-        _quantidades = new Dictionary<string, int>
-        {
-            ["Queijo"] = 10,
-            ["Tomate"] = 8,
-            ["Carne"] = 6,
-            ["Massa"] = 6,
-            ["Pao"] = 6,
-            ["Alface"] = 6
-        };
+        _quantidades = saldoUniforme.HasValue
+            ? new Dictionary<string, int>
+            {
+                ["Queijo"] = saldoUniforme.Value,
+                ["Tomate"] = saldoUniforme.Value,
+                ["Carne"] = saldoUniforme.Value,
+                ["Massa"] = saldoUniforme.Value,
+                ["Pao"] = saldoUniforme.Value,
+                ["Alface"] = saldoUniforme.Value
+            }
+            : new Dictionary<string, int>
+            {
+                ["Queijo"] = 10,
+                ["Tomate"] = 8,
+                ["Carne"] = 6,
+                ["Massa"] = 6,
+                ["Pao"] = 6,
+                ["Alface"] = 6
+            };
     }
 
     public async Task<(bool Sucesso, int NegativosGerados)> ConsumirSemControleAsync(
@@ -73,6 +84,39 @@ public sealed class Estoque
             TipoEvento.Cozinheiro);
 
         return (true, negativosGerados);
+    }
+
+    /// <summary>
+    /// Versão atômica com lock (elimina check-then-act / estoque negativo nas soluções posteriores).
+    /// </summary>
+    public bool TentarConsumirComLock(Pedido pedido, string autor)
+    {
+        lock (_lockEstoque)
+        {
+            foreach (string ingrediente in pedido.Prato.Ingredientes)
+            {
+                if (_quantidades[ingrediente] <= 0)
+                {
+                    pedido.Status = StatusPedido.RecusadoSemEstoque;
+                    _logger.Registrar(
+                        autor,
+                        $"Recusou pedido #{pedido.Codigo} ({pedido.Prato.Nome}): faltou '{ingrediente}' (saldo: {_quantidades[ingrediente]}).",
+                        TipoEvento.Aviso);
+                    return false;
+                }
+            }
+
+            foreach (string ingrediente in pedido.Prato.Ingredientes)
+            {
+                _quantidades[ingrediente]--;
+            }
+
+            _logger.Registrar(
+                autor,
+                $"Separou ingredientes [{string.Join(", ", pedido.Prato.Ingredientes)}] para #{pedido.Codigo}.",
+                TipoEvento.Cozinheiro);
+            return true;
+        }
     }
 
     /// <summary>

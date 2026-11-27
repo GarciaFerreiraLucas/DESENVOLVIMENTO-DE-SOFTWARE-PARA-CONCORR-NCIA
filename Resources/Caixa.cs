@@ -10,6 +10,7 @@ namespace RestauranteConcorrente.Resources;
 public sealed class Caixa
 {
     private readonly EventLogger _logger;
+    private readonly object _lockCaixa = new();
 
     public decimal FaturamentoTotal { get; private set; }
     public int VendasRegistradas { get; private set; }
@@ -53,5 +54,22 @@ public sealed class Caixa
         }
 
         return houveLostUpdate;
+    }
+
+    /// <summary>
+    /// Versão protegida com lock (elimina lost update nas soluções posteriores).
+    /// </summary>
+    public void RegistrarVendaComLock(Pedido pedido, string autor)
+    {
+        lock (_lockCaixa)
+        {
+            FaturamentoTotal += pedido.Prato.Preco;
+            VendasRegistradas++;
+
+            _logger.Registrar(
+                autor,
+                $"Finalizou #{pedido.Codigo} e registrou R$ {pedido.Prato.Preco:F2} no Caixa (Total: R$ {FaturamentoTotal:F2}).",
+                TipoEvento.Sucesso);
+        }
     }
 }

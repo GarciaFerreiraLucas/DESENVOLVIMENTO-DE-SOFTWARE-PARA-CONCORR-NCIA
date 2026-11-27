@@ -10,6 +10,7 @@ namespace RestauranteConcorrente.Resources;
 public sealed class BalcaoPedidos
 {
     private readonly List<Pedido> _pedidos = new(capacity: 64);
+    private readonly object _lockBalcao = new();
     private readonly EventLogger _logger;
 
     public int CapacidadeMaxima { get; }
@@ -126,6 +127,71 @@ public sealed class BalcaoPedidos
                 autor,
                 $"Erro de concorrência no balcão {detalhePedido}: {ex.GetType().Name} (lista alterada por outra thread)!");
             return (null, false, true);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Operações com lock (usadas a partir da Solução Ingênua 2 para eliminar
+    // a race condition na lista e evidenciar outros problemas de concorrência).
+    // -------------------------------------------------------------------------
+
+    public bool EstaVazioComLock()
+    {
+        lock (_lockBalcao)
+        {
+            return _pedidos.Count == 0;
+        }
+    }
+
+    public int ObterQuantidadeComLock()
+    {
+        lock (_lockBalcao)
+        {
+            return _pedidos.Count;
+        }
+    }
+
+    public bool TentarAdicionarComLock(Pedido pedido, string autor)
+    {
+        lock (_lockBalcao)
+        {
+            if (_pedidos.Count >= CapacidadeMaxima)
+            {
+                return false;
+            }
+
+            _pedidos.Add(pedido);
+            pedido.Status = StatusPedido.NoBalcao;
+
+            _logger.Registrar(
+                autor,
+                $"Colocou pedido {pedido} no balcão ({_pedidos.Count}/{CapacidadeMaxima}).",
+                TipoEvento.Garcom);
+            return true;
+        }
+    }
+
+    public bool TentarRetirarComLock(string autor, out Pedido? pedido)
+    {
+        lock (_lockBalcao)
+        {
+            if (_pedidos.Count == 0)
+            {
+                pedido = null;
+                return false;
+            }
+
+            pedido = _pedidos[0];
+            _pedidos.RemoveAt(0);
+            pedido.CozinheiroResponsavel = autor;
+            pedido.VezesPego++;
+            pedido.Status = StatusPedido.EmPreparo;
+
+            _logger.Registrar(
+                autor,
+                $"Retirou pedido {pedido} do balcão (restam {_pedidos.Count}/{CapacidadeMaxima}).",
+                TipoEvento.Cozinheiro);
+            return true;
         }
     }
 }

@@ -6,6 +6,7 @@ public sealed class ResultadoGarcom
     public List<Pedido> PedidosCriados { get; } = [];
     public int EstourosBalcaoObservados { get; set; }
     public int ErrosConcorrenciaLista { get; set; }
+    public long IteracoesEsperaOcupada { get; set; }
 }
 
 public sealed class ResultadoCozinheiro
@@ -17,5 +18,9 @@ public sealed class ResultadoCozinheiro
     public int EstoquesNegativosObservados { get; set; }
     public int LostUpdatesCaixaObservados { get; set; }
     public int ErrosConcorrenciaLista { get; set; }
+    public int DeadlocksDetectados { get; set; }
+    public int BloqueiosCascataDeadlock { get; set; }
+    public int PedidosTravadosDeadlock { get; set; }
+    public long IteracoesEsperaOcupada { get; set; }
     public decimal FaturamentoEsperadoLocal { get; set; }
 }
